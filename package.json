@@ -1,0 +1,39 @@
+{
+  "name": "agent-bundle-example",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A stdio MCP server plugin built with agent-bundle.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.0"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/status.d.ts",
+      "import": "./dist/status.js"
+    }
+  },
+  "scripts": {
+    "build": "agent-bundle build --json --output artifact",
+    "check": "npm run build && npm run typecheck && npm test",
+    "dev": "agent-bundle dev",
+    "pack:check": "agent-bundle prepack --json --output artifact",
+    "test": "npm run test:unit && npm run test:routes && npm run test:projection",
+    "test:projection": "rstest --config rstest.projection.config.ts",
+    "test:routes": "rstest --config rstest.route-unit.config.ts",
+    "test:unit": "rstest tests --exclude \"tests/{route-unit,projection}/**\"",
+    "typecheck": "npm run validate && tsc -p tsconfig.json --noEmit",
+    "validate": "agent-bundle validate --json"
+  },
+  "devDependencies": {
+    "@rstest/core": "0.11.12",
+    "@types/node": "26.5.1",
+    "agent-bundle": "https://pkg.pr.new/ScriptedAlchemy/agent-bundle/agent-bundle@5806761",
+    "typescript": "7.0.2",
+    "@types/react": "19.3.0",
+    "@agent-bundle/runtime": "https://pkg.pr.new/ScriptedAlchemy/agent-bundle/@agent-bundle/runtime@5806761",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.4"
+  }
+}
