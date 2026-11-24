@@ -1,68 +1,117 @@
-# agent-bundle-example
+# release-desk: an agent-bundle example
 
-A convention-driven MCP server built with [agent-bundle](https://github.com/ScriptedAlchemy/agent-bundle).
-The single route `src/mcp/status/tools/report-status.tsx` owns its schemas,
-static protocol metadata, execution, and `Agent.*` rendering. Its path creates
-the `status` server; no handwritten server factory or server config is needed.
+A small but complete [agent-bundle](https://github.com/ScriptedAlchemy/agent-bundle)
+plugin that tells you whether a service is ready to ship. One source tree
+compiles into a plugin for Claude Code, Codex, Cursor, and the portable Agent
+Plugins format, plus an npm package with a CLI and a library.
 
-## Commands
+The release data is a hard-coded table in `src/release.ts` (`api` is ready,
+`web` and `worker` are blocked), so everything runs offline and deterministically.
+Swap that table for a real CI or ticketing call and nothing else changes.
+
+## What each file demonstrates
+
+Almost everything is declared by **where a file lives**, not by config.
+
+| Feature | File | Becomes |
+| --- | --- | --- |
+| Config | `agent-bundle.config.ts` | Identity, targets, marketplace, `web`, portable and Cursor manifest metadata. Version comes from `package.json`. |
+| MCP tool | `src/mcp/release/tools/list-services.tsx` | `list-services` on the generated `release` MCP server |
+| MCP tool + App + CLI | `src/mcp/release/tools/check-readiness.tsx` | `check-readiness` tool, opens the dashboard App, and is projected to the CLI by `check-readiness.cli.ts` |
+| MCP tool + provider + meta | `src/mcp/release/tools/draft-notes.tsx` | Reads the `repo` provider via `await agent()` and the plugin version via `agent-bundle/meta` |
+| MCP resource | `src/mcp/release/resources/policy.tsx` | `policy://release-desk/release` |
+| MCP prompt | `src/mcp/release/prompts/release-review.tsx` | `release-review` prompt |
+| MCP App | `src/mcp/release/apps/dashboard.{ts,html}` | Self-contained `mcp-apps/dashboard.html`; calls tools and reads resources back through the bridge |
+| Layout | `src/layout.tsx` | Wraps every rendered route; adds `_meta.releaseDesk` to MCP results |
+| Provider | `src/providers/repo.ts` | Lazily-resolved git branch/head, available to any route |
+| Plain CLI command | `src/cli/services.ts` | `release-desk services [--owner X]` (one JSON line) |
+| Rendered CLI command | `src/cli/notes.tsx` | `release-desk notes [service]` (Markdown, `--json`, `--ndjson`, TTY progress) |
+| Artifact script | `src/scripts/verify-release.ts` | `scripts/verify-release.mjs`, exits 1 when blocked |
+| Hook: context | `src/events/session/start.tsx` | `SessionStart` on Claude/Codex, `sessionStart` on Cursor; injects blocked releases |
+| Hook: guard | `src/events/tool/before.tsx` | Denies `npm publish` / `git push --tags` before shell commands, on every host. A guardrail against accidental publishes, not a sandbox. |
+| Skill | `src/skills/release-readiness/SKILL.md` + `references/` | Hand-written skill with a reference doc |
+| Generated skill | `src/skills/service-catalog/SKILL.tsx` | Rendered to `SKILL.md` at build time from the same data the tools use |
+| Command | `src/commands/ship.md` | `/ship` (Claude and Cursor) |
+| Rule | `src/rules/changelog.mdc` | Cursor rule scoped to `**/CHANGELOG.md` |
+| Library | `src/index.ts` | `dist/index.js` + `.d.ts` (the package's `exports`) |
+| Eval | `evals/readiness.eval.ts` | Deterministic eval run against the built artifact |
+
+## Try it
 
 ```sh
-npm run dev
-npm run build
-npm test                 # every test pool: unit, route-unit, projection
-npm run check            # build + typecheck + npm test
-npm run typecheck        # validate (writes .agent-bundle/routes.d.ts) + tsc
-npm run test:unit        # plain module tests only
-npm run test:routes      # route-unit pool only
-npm run test:projection  # in-memory MCP projection pool only
-npx --no-install agent-bundle mcp list --server status --target portable --artifact artifact
-
-# after publishing/removing "private" and installing the package
-npx --no-install agent-bundle install claude --from node_modules/agent-bundle-example
+pnpm install
+pnpm run check          # build + validate + typecheck + all test pools + eval
+pnpm dev                # local Workbench with live rebuilds
 ```
 
-Installing the npm package does not mutate any host; run
-`npx --no-install agent-bundle install <host> --from node_modules/<package>` explicitly.
-Validate and publish the generated npm root with
-`npm run pack:check && npm publish ./dist --ignore-scripts`.
+Then poke at what the build produced in `artifact/`:
 
-## Layout
+```sh
+node artifact/bin/release-desk.mjs --help
+node artifact/bin/release-desk.mjs readiness worker
+node artifact/bin/release-desk.mjs notes api --json
+node artifact/bin/release-desk.mjs web                 # dashboard App in a browser
+node artifact/scripts/verify-release.mjs web; echo $?  # 1: blocked
 
-- `agent-bundle.config.ts`: plugin identity, targets, and project policy.
-- `src/mcp/status/tools/report-status.tsx`: the complete MCP tool route.
-- `src/scripts/check-status.ts`: an artifact script with a generated process envelope.
-- `src/status.ts`: shared domain logic covered by `tests/` and published as
-  the package library export.
-- `rstest.route-unit.config.ts`, `rstest.projection.config.ts`: the two
-  framework-generated test pools (see below).
+npx agent-bundle inspect                               # what each host receives, and why
+npx agent-bundle mcp list --artifact artifact --server release --target claude
+npx agent-bundle hooks simulate --artifact artifact --target claude \
+  --hook event-route-tool-before \
+  --input '{"hook_event_name":"PreToolUse","session_id":"s","transcript_path":"/tmp/t","cwd":"/tmp","tool_name":"Bash","tool_use_id":"t","tool_input":{"command":"npm publish"}}'
+```
+
+Install into a host straight from the build:
+
+```sh
+npx agent-bundle install claude --from artifact
+npx agent-bundle install codex --from artifact
+npx agent-bundle install cursor --from artifact
+```
+
+## What the build emits
+
+`artifact/` is one plugin root shared by every host:
+
+```
+.claude-plugin/  .codex-plugin/  .cursor-plugin/  .agents/   per-host manifests
+plugin.json  mcp.json                                        portable (Agent Plugins 1.0)
+.mcp.json                                                    Claude's MCP config
+mcp/mcp-release-<hash>.mjs                                   the bundled MCP server
+mcp-apps/dashboard.html                                      the App, inlined into one file
+bin/release-desk.mjs                                         the routed CLI
+hooks/event-route-*.{claude,codex,cursor}.mjs + hooks.json   per-host hook wrappers
+scripts/verify-release.mjs
+skills/  commands/  rules/
+INSTALL.md  install.mjs  agent-bundle.manifest.json  agent-bundle.compile-evidence.json
+```
+
+`dist/` is the npm package: the library, its declarations, and the same CLI as
+the package `bin`.
 
 ## Tests
 
-`npm test` tests the plugin: it runs the three pools below in turn, so a route
-that stops rendering or a server that stops registering it fails the ordinary
-test command even while the plain module tests stay green. Each pool names the
-proof level it carries and is reported as its own run, a pass at one level is
-never a receipt for another. The focused scripts run one pool for a tight loop,
-and take Rstest's own flags after `--` (`npm run test:routes -- --watch`).
+`pnpm test` runs three pools. Each one proves a different thing:
 
-| pool | command | files | what a pass proves |
-| --- | --- | --- | --- |
-| unit | `npm run test:unit` | `tests/*.test.ts` | ordinary module tests over `src/status.ts`; no framework involved |
-| route-unit | `npm run test:routes` | `tests/route-unit/**` | the route module renders to the Agent Document it claims, through the real renderer, no artifact, no transport |
-| projection | `npm run test:projection` | `tests/projection/**` | the real generated MCP server registers the route and projects its document to protocol content, over the SDK's in-memory transport, not a process, not the packed artifact |
+| Pool | Files | Proves |
+| --- | --- | --- |
+| unit | `tests/*.test.ts` | Domain logic, no framework |
+| route-unit | `tests/route-unit/**` | Each route renders the right document: tools, prompt, both hooks (including the deny) |
+| projection | `tests/projection/**` | The real generated MCP server over an in-memory transport, the CLI command graph, and the script's exit codes |
 
-The two framework pools are generated by `agentBundleRstest()` from
-`agent-bundle/rstest`: one compiler pass, the same route compilation the build
-performs, with no artifact built, supplies the route manifest, the route
-loaders, React's `react-server` conditions, and the JSX transform. The helpers
-(`renderRoute`, `expectDocument`, `invokeMcpTool`, `listMcpSurface`, …) come
-from `agent-bundle/test`, and every one of them stamps its proof level into the
-result and into any failure message.
+## Things this example ran into
 
-Process-level evidence, a spawned stdio server from a built artifact, is a
-further level the framework offers (`openPackedMcpServer`); this template does
-not ship it, because it costs a pack and an install per run.
-
-The scaffold pins matching `agent-bundle` and `@agent-bundle/runtime` builds.
-For preview URL forms, see [Preview packages](https://github.com/ScriptedAlchemy/agent-bundle/blob/main/docs/preview-packages.md).
+- **Commands are shared between Claude and Cursor.** Both hosts read the same
+  `commands/` folder in the composite root, and Cursor drops command
+  frontmatter, so a command must be frontmatter-free to stay identical for
+  both. Claude's validator warns about that (`AB6020`); the warning is expected.
+  Building Claude and Cursor into separate artifacts would remove it.
+- **Library declarations do not see generated route types.** The `.d.ts` pass
+  for `src/index.ts` type-checks all of `src/` without
+  `.agent-bundle/routes.d.ts`, so the App and the provider call cast to types
+  from `src/release.ts` instead of relying on the generated registry.
+- **Hooks are `.tsx` so they can be unit-tested.** A lightweight `.ts` event
+  handler that returns `{ outcome }` works in the build but cannot be rendered by
+  `renderRoute`; the `.tsx` form returns the same decision through
+  `<Agent.Result value>` and is testable.
+- **pnpm 11+ blocks the preview tarballs' URL subdependencies by default.**
+  `pnpm-workspace.yaml` sets `blockExoticSubdeps: false` so install works.
