@@ -1,21 +1,21 @@
 {
-  "name": "agent-bundle-example",
+  "name": "bundle-example",
   "version": "0.1.0",
   "private": true,
-  "description": "A stdio MCP server plugin built with agent-bundle.",
+  "description": "A feature-complete agent-bundle example: release-readiness MCP server, MCP App, CLI, hooks, skills, commands, rules, and evals.",
   "type": "module",
   "engines": {
     "node": ">=22.22.0"
   },
   "exports": {
     ".": {
-      "types": "./dist/status.d.ts",
-      "import": "./dist/status.js"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
   "scripts": {
     "build": "agent-bundle build --json --output artifact",
-    "check": "npm run build && npm run typecheck && npm test",
+    "check": "npm run build && npm run typecheck && npm test && npm run eval",
     "dev": "agent-bundle dev",
     "pack:check": "agent-bundle prepack --json --output artifact",
     "test": "npm run test:unit && npm run test:routes && npm run test:projection",
@@ -23,7 +23,8 @@
     "test:routes": "rstest --config rstest.route-unit.config.ts",
     "test:unit": "rstest tests --exclude \"tests/{route-unit,projection}/**\"",
     "typecheck": "npm run validate && tsc -p tsconfig.json --noEmit",
-    "validate": "agent-bundle validate --json"
+    "validate": "agent-bundle validate --json",
+    "eval": "agent-bundle eval --artifact artifact"
   },
   "devDependencies": {
     "@rstest/core": "0.11.12",

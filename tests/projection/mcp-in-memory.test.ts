@@ -1,33 +1,38 @@
 import { expect, it } from '@rstest/core';
-import { invokeMcpTool, listMcpSurface, renderRoute } from 'agent-bundle/test';
+import { getMcpPrompt, invokeMcpTool, listMcpSurface, readMcpResource } from 'agent-bundle/test';
 
 /**
- * The mcp-in-memory proof level: the real generated MCP server — the same
- * registration and Agent Document projection a built artifact runs — driven by
- * a real MCP client over the SDK's in-memory transport pair. It proves the
- * protocol contract and only that: no process starts, no stdio framing is
- * exercised, and a pass here says nothing about the packed artifact.
+ * mcp-in-memory level: the real generated `release` MCP server driven by a
+ * real MCP client over the SDK's in-memory transport. Proves the protocol
+ * contract, not the packed process.
  */
-it('registers the compiled route on the generated status server', async () => {
+it('registers tools, the resource, and the prompt from the file layout', async () => {
   const surface = await listMcpSurface();
 
-  expect(surface.tools).toEqual(['report-status']);
-  expect(surface.provenance).toMatchObject({
-    proofLevel: 'mcp-in-memory',
-    routeIds: ['tool:status/report-status'],
-    serverName: 'status',
+  expect([...surface.tools].sort()).toEqual(['check-readiness', 'draft-notes', 'list-services']);
+  expect(surface.resources).toContain('policy://release-desk/release');
+  expect(surface.prompts).toEqual(['release-review']);
+});
+
+it('returns structured content plus the layout metadata', async () => {
+  const invocation = await invokeMcpTool('check-readiness', { input: { service: 'api' } });
+
+  expect(invocation.isError).toBe(false);
+  expect(invocation.structuredContent).toMatchObject({ service: 'api', verdict: 'ready' });
+  // Added by src/layout.tsx, not by the tool.
+  expect(invocation._meta).toMatchObject({
+    releaseDesk: { route: 'tool:release/check-readiness', surface: 'tool' },
   });
 });
 
-it('projects the rendered document into the protocol result the server returns', async () => {
-  const invocation = await invokeMcpTool('report-status', { input: { service: 'docs' } });
-  // The same input at the route-unit level, so the assertion below is parity
-  // between the rendered document and what the protocol carried, not a second
-  // hand-written copy of the expected value.
-  const rendered = await renderRoute('tool:status/report-status', { input: { service: 'docs' } });
+it('serves the release policy resource', async () => {
+  const read = await readMcpResource('policy://release-desk/release');
 
-  expect(invocation.isError).toBe(false);
-  expect(invocation.content).toEqual([{ text: 'docs is ready.', type: 'text' }]);
-  expect(invocation.structuredContent).toEqual(rendered.document.value);
-  expect(invocation.provenance.proofLevel).toBe('mcp-in-memory');
+  expect(String(read.contents[0]?.text)).toContain('every check passes');
+});
+
+it('serves the release-review prompt', async () => {
+  const prompt = await getMcpPrompt('release-review', { input: { service: 'api' } });
+
+  expect(JSON.stringify(prompt.messages)).toContain('Review the api release.');
 });

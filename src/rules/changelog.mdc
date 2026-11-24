@@ -1,0 +1,13 @@
+---
+description: How to write changelog entries for release-desk services.
+globs: "**/CHANGELOG.md"
+alwaysApply: false
+targets: [cursor]
+---
+When editing a CHANGELOG.md:
+
+- Add the entry under a heading that matches the version being released.
+- Write each change as one sentence that a customer could act on.
+- Mention removed or renamed routes first.
+- A missing entry blocks the release; run the `check-readiness` tool afterwards
+  to confirm the changelog check passes.
